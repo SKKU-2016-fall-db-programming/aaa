@@ -16,30 +16,28 @@
 #include "btreeInt.h"
 #include "sqliteInt.h"
 
-extern void *plogfile;
+int nLSN=0;
 extern void *save_log;
 int p_check;
 int pragma_check;
 
-int resetlog()
-{
-	//*((int *)plogfile)=0;
-}
-
-int savelog(int type, int pgno, int idx, int ndata, char *data)
+int savelog(int type, int page, int table, int ndata, char *data)
 {
 	_record *a=(_record *)save_log;
 	
 	a->LSN=(int)save_log;
 	a->type=type;
-	a->pgno=pgno;
-	a->idx=idx;
+	a->page=page;
+	a->table=table;
 	a->ndata=ndata;
 	memcpy(a->data,data,ndata);
 
 	save_log=((void *)a)+20+ndata;
+	*((int *)savelog)=0xffffffff;
 
 	msync(save_log, 1024*1024, MS_SYNC);
+
+	pragma_check=0;
 
 	return a->LSN;
 }
@@ -3849,7 +3847,7 @@ static void btreeEndTransaction(Btree *p){
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 	if(p_check>=10 || pragma_check==1)
 	{
-		p_check=0;pragma_check=0;
+		p_check=0;
 		
   if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
   sqlite3BtreeEnter(p);
@@ -8088,15 +8086,14 @@ int sqlite3BtreeInsert(
 
   savelog(0, //insert
 	  pPage->pgno, 
-	  idx,	//pCur->pgnoRoot,
+	  pCur->pgnoRoot,
 	  szNew,	//pX->nData,
-	  newCell	//pX->pData
+	  newCell //pX->pData
 	  );
 
   insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
   assert( pPage->nOverflow==0 || rc==SQLITE_OK );
   assert( rc!=SQLITE_OK || pPage->nCell>0 || pPage->nOverflow>0 );
-
 
   /* If no error has occurred and pPage has an overflow cell, call balance() 
   ** to redistribute the cells within the tree. Since balance() may move

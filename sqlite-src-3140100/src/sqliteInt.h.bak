@@ -498,8 +498,8 @@
 typedef struct logrecord {
   int LSN;
   int type; //0 insert, 1 update, 2 delete
-  int pgno;
-  int idx;
+  int page;
+  int table;
   int ndata;
   char data[];
 } _record;

@@ -2744,8 +2744,12 @@ int sqlite3ParseUri(
 ** sqlite3_open() and sqlite3_open16(). The database filename "zFilename"  
 ** is UTF-8 encoded.
 */
+
+/****/
 void *save_log=NULL;
+void *plogfile=NULL;
 int save_log_fd=0;
+char *save_filename="./save-log";
 static int openDatabase(
   const char *zFilename, /* Database filename UTF-8 encoded */
   sqlite3 **ppDb,        /* OUT: Returned database handle */
@@ -2767,9 +2771,8 @@ static int openDatabase(
   if( rc ) return rc;
 #endif
 
-	save_log_fd=open("./save-log",O_RDWR | O_CREAT, 0644);
-	ftruncate(save_log_fd,1024*1024);
-	save_log=(void*)mmap(NULL, 1024*1024, PROT_READ | PROT_WRITE, MAP_SHARED, save_log_fd, 0);
+
+	
 
 
   /* Only allow sensible combinations of bits in the flags argument.  
@@ -2955,6 +2958,57 @@ static int openDatabase(
   */
   sqlite3Error(db, SQLITE_OK);
   sqlite3RegisterPerConnectionBuiltinFunctions(db);
+
+	/****/
+
+  if(access(save_filename,F_OK)==0)
+  {
+	  MemPage *pPage;
+	  int xRC;
+
+	  /** 초기화 시작 **/
+	  char tempsql0[100]="PRAGMA journal_mode=wal;";
+	  char tempsql1[100]="select * from test;";
+
+	  fprintf(stderr,"*** recovery ***\n");
+
+	  sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
+	  sqlite3_exec(db,tempsql1,0,0, &zErrMsg);
+
+	  save_log_fd=open(save_filename,O_RDWR | O_CREAT, 0644);
+	  save_log=(void*)mmap(NULL, 1024*1024, PROT_READ | PROT_WRITE, MAP_SHARED, save_log_fd, 0);
+	  /** 초기화 끝 **/
+
+	  while(1)
+	  {
+		  _record *a=(_record *)save_log;
+
+		  /** LSN이 0이면 끝까지 온거 **/
+		  if(a->LSN==0) break;
+
+		  fprintf(stderr,"log recovery %d\n",a->ndata);
+
+		  /** insert **/
+		  sqlite3BtreeEnter(db->aDb[0].pBt);
+		  btreeGetPage(db->aDb[0].pBt->pBt, a->pgno, &pPage, 0);
+		  insertCell(pPage, a->idx, a->data, a->ndata, 0, 0, &xRC);
+		  sqlite3BtreeLeave(db->aDb[0].pBt);
+
+		  /** 다음 레코드로 이동 **/
+		  save_log=((void *)a)+20+a->ndata;
+		  
+	  }
+
+	  /** 로그파일 삭제 **/
+	  remove(save_filename);
+
+	  fprintf(stderr,"*** recovery ***\n\n");
+  }
+
+  save_log_fd=open(save_filename,O_RDWR | O_CREAT, 0644);
+  ftruncate(save_log_fd,1024*1024);
+  save_log=(void*)mmap(NULL, 1024*1024, PROT_READ | PROT_WRITE, MAP_SHARED, save_log_fd, 0);
+  plogfile=save_log;
 
   /* Load automatic extensions - extensions that have been registered
   ** using the sqlite3_automatic_extension() API.

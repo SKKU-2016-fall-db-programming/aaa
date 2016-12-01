@@ -14,35 +14,34 @@
 ** Including a description of file format and an overview of operation.
 */
 #include "btreeInt.h"
+#include "sqliteInt.h"
 
-int nLSN=0;
+extern void *plogfile;
 extern void *save_log;
 int p_check;
 int pragma_check;
 
-typedef struct logrecord {
-  int LSN;
-  int type; //0 insert, 1 update, 2 delete
-  int page;
-  int table;
-  int ndata;
-  char data[];
-} _record;
+int resetlog()
+{
+	//*((int *)plogfile)=0;
+}
 
-int savelog(int type, int page, int table, int ndata, char *data)
+int savelog(int type, int pgno, int idx, int ndata, char *data)
 {
 	_record *a=(_record *)save_log;
 	
-	a->LSN=nLSN++;
+	a->LSN=(int)save_log;
 	a->type=type;
-	a->page=page;
-	a->table=table;
+	a->pgno=pgno;
+	a->idx=idx;
 	a->ndata=ndata;
 	memcpy(a->data,data,ndata);
 
 	save_log=((void *)a)+20+ndata;
 
 	msync(save_log, 1024*1024, MS_SYNC);
+
+	return a->LSN;
 }
 
 /*
@@ -55,7 +54,7 @@ static const char zMagicHeader[] = SQLITE_FILE_HEADER;
 ** Set this global variable to 1 to enable tracing using the TRACE
 ** macro.
 */
-#if 1
+#if 0
 int sqlite3BtreeTrace=1;  /* True to enable tracing */
 # define TRACE(X)  if(sqlite3BtreeTrace){printf X;fflush(stdout);}
 #else
@@ -3850,8 +3849,8 @@ static void btreeEndTransaction(Btree *p){
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 	if(p_check>=10 || pragma_check==1)
 	{
-		p_check=0;
-		pragma_check=0;
+		p_check=0;pragma_check=0;
+		
   if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
   sqlite3BtreeEnter(p);
   btreeIntegrity(p);
@@ -8053,12 +8052,6 @@ int sqlite3BtreeInsert(
   assert( pPage->intKey || pX->nKey>=0 );
   assert( pPage->leaf || !pPage->intKey );
 
-  savelog(0, //insert
-	  pPage->pgno, 
-	  pCur->pgnoRoot,
-	  pX->nData,
-	  pX->pData);
-
   p_check++;
 
   TRACE(("INSERT: table=%d nkey=%lld ndata=%d page=%d %s\n",
@@ -8092,9 +8085,18 @@ int sqlite3BtreeInsert(
   }else{
     assert( pPage->leaf );
   }
+
+  savelog(0, //insert
+	  pPage->pgno, 
+	  idx,
+	  szNew,
+	  newCell
+	  );
+
   insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
   assert( pPage->nOverflow==0 || rc==SQLITE_OK );
   assert( rc!=SQLITE_OK || pPage->nCell>0 || pPage->nOverflow>0 );
+
 
   /* If no error has occurred and pPage has an overflow cell, call balance() 
   ** to redistribute the cells within the tree. Since balance() may move
