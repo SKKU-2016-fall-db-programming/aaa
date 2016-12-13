@@ -2746,10 +2746,12 @@ int sqlite3ParseUri(
 */
 
 /****/
+extern int checkpoint();
 void *save_log=NULL;
 void *plogfile=NULL;
 int save_log_fd=0;
 char *save_filename="./save-log";
+Btree *pbt;
 static int openDatabase(
   const char *zFilename, /* Database filename UTF-8 encoded */
   sqlite3 **ppDb,        /* OUT: Returned database handle */
@@ -2960,7 +2962,7 @@ static int openDatabase(
   sqlite3RegisterPerConnectionBuiltinFunctions(db);
 
 	/****/
-
+  pbt=db->aDb[0].pBt;
   if(access(save_filename,F_OK)==0)
   {
 	  MemPage *pPage;
@@ -2994,11 +2996,22 @@ static int openDatabase(
 		  insertCell(pPage, a->idx, a->data, a->ndata, 0, 0, &xRC);
 		  sqlite3BtreeLeave(db->aDb[0].pBt);
 
+		  DbPage *sampleDP;
+		  sqlite3PagerGet(db->aDb[0].pBt->pBt->pPager,a->pgno,&sampleDP,0);
+		  /* 로깅하는 해당 페이지 번호를 통해 DbPage 가져오기  */
+		  sampleDP->pPager->eState=PAGER_WRITER_FINISHED;
+		  /* 해당 Pager 객체 Write한 것을 표시 !*/
+		  sqlite3PcacheMakeDirty(sampleDP);
+		  /* 해당 Page Dirty로 만들기!*/
+
+
 		  /** 다음 레코드로 이동 **/
 		  save_log=((void *)a)+20+a->ndata;
 		  
 	  }
+	  //checkpoint();
 
+		
 	  /** 로그파일 삭제 **/
 	  remove(save_filename);
 
